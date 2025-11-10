@@ -1,0 +1,38 @@
+# config
+
+#   This file is sourced by ssh-tunnel-agent to set the default configuration.
+#   It is searched for in the following order:
+#
+#   - "${XDG_CONFIG_HOME:-${HOME}/.config}/ssh-tunnel-agent/config"
+#   - "${HOME}/.local/etc/ssh-tunnel-agent/config"
+#   - "/usr/local/etc/ssh-tunnel-agent/config"
+#   - "/etc/ssh-tunnel-agent/config"
+
+# SSH Connection Settings
+ssh_config[host]="jumphost"
+ssh_config[port]="22"
+ssh_config[user]=${USER}
+ssh_config[term]="xterm-256color"
+
+# Tunnel Definitions
+# Format: [name]="type:spec type:spec ..."
+#
+# Tunnel Types:
+#   L:localport:remotehost:remoteport  - Local port forward
+#   D:localport                        - Dynamic SOCKS proxy
+#   R:remoteport:localhost:localport   - Remote port forward
+#
+# Examples:
+#   [web]="L:8080:webserver:80"
+#   [proxy]="D:1080"
+#   [reverse]="R:9000:localhost:9000"
+#   [multi]="L:3000:srv1:3000 L:4000:srv2:4000"
+
+tunnel_spec=(
+  [svn]="L:3690:remotehost:3690 L:3343:remotehost:3343"
+  [jira]="L:8081:remotehost:8081"
+  [socks]="D:65135"
+)
+
+# Optional: Enable debug logging
+# DEBUG=1
