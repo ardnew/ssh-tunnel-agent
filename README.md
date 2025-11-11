@@ -13,6 +13,14 @@ A lightweight bash tool that manages SSH tunnels through tmux, with automatic re
 - **macOS LaunchAgent** - Optional automatic startup and config file watching
 - **Simple Setup** - File-based configuration, easy install/uninstall via [`Makefile`](Makefile)
 
+## Quickstart
+
+```bash
+git clone https://github.com/ardnew/ssh-tunnel-agent.git
+cd ssh-tunnel-agent
+make help
+```
+
 ## Installation
 
 ```bash
