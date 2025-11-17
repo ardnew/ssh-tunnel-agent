@@ -9,7 +9,7 @@
 #   - "/etc/ssh-tunnel-agent/config"
 
 # SSH Connection Settings
-ssh_config[host]="jumphost"
+ssh_config[host]="proxyhost"
 ssh_config[port]="22"
 ssh_config[user]=${USER}
 ssh_config[term]="xterm-256color"

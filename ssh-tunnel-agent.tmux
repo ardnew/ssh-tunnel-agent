@@ -29,7 +29,7 @@ declare -r _log_file="${XDG_STATE_HOME:-${HOME}/.local/state}/${_self_id}/tunnel
 
 # Default SSH connection settings (can be overridden in config)
 declare -A ssh_config=(
-  [host]="jumphost"
+  [host]="proxyhost"
   [port]="22"
   [user]=${USER}
   [term]=${TERM}
@@ -357,7 +357,7 @@ Configuration:
   Config file can override ssh_config and tunnel_spec arrays.
 
   ssh_config keys:
-    host    - SSH jump host (default: jumphost)
+    host    - SSH proxy host (default: proxyhost)
     port    - SSH port (default: 22)
     user    - SSH user (default: current user)
     term    - Terminal type (default: current TERM)
