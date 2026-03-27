@@ -34,16 +34,17 @@ Edit the config file at `~/.config/ssh-tunnel-agent/config`:
 
 ```bash
 # SSH Connection Settings
-ssh_config[host]="proxyhost"
-ssh_config[port]="22"
-ssh_config[user]="${USER}"
-ssh_config[term]="xterm-256color"
+ssh_host="proxyhost"
+ssh_port="22"
+ssh_user="${USER}"
+ssh_term="xterm-256color"
 
 # Tunnel Definitions
-tunnel_spec=(
-  [web]="L:8080:webserver:80"
-  [socks]="D:1080"
-  [database]="L:5432:dbserver:5432"
+tunnel_names=(  "web"      "socks"    "database" )
+tunnel_specs=(
+  "L:8080:webserver:80"
+  "D:1080"
+  "L:5432:dbserver:5432"
 )
 ```
 
@@ -178,24 +179,27 @@ tail -f /tmp/ssh-tunnel-agent/launchd-*.log
 
 **Web development tunnelled through SSH host:**
 ```bash
-tunnel_spec=(
-  [dev]="L:3000:web.internal:3000 L:3001:ssl.internal:3001"
-  [api]="L:8080:api.internal:8080"
+tunnel_names=(  "dev"  "api" )
+tunnel_specs=(
+  "L:3000:web.internal:3000 L:3001:ssl.internal:3001"
+  "L:8080:api.internal:8080"
 )
 ```
 
 **Database access:**
 ```bash
-tunnel_spec=(
-  [postgres]="L:5432:db.internal:5432"
-  [redis]="L:6379:cache.internal:6379"
+tunnel_names=(  "postgres"  "redis" )
+tunnel_specs=(
+  "L:5432:db.internal:5432"
+  "L:6379:cache.internal:6379"
 )
 ```
 
 **General SOCKS proxy for all traffic:**
 ```bash
-tunnel_spec=(
-  [proxy]="D:1080"
+tunnel_names=(  "proxy" )
+tunnel_specs=(
+  "D:1080"
 )
 ```
 

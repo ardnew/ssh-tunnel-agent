@@ -24,7 +24,7 @@ CONFIG_SRC := config
 TMUX_SRC := ssh-tunnel-agent.tmux
 PLIST_SRC := ssh-tunnel-agent.plist
 
-.PHONY: all install install-config install-tmux install-plist check-path enable clean uninstall help
+.PHONY: all install install-config install-tmux install-plist check-path enable disable clean uninstall help
 
 all: install
 
@@ -36,6 +36,7 @@ help:
 	@echo "  make install-tmux   - Install tmux script only"
 	@echo "  make install-plist  - Install launchd plist only (macOS)"
 	@echo "  make enable         - Enable LaunchAgent via launchctl (macOS)"
+	@echo "  make disable        - Disable LaunchAgent via launchctl (macOS)"
 	@echo "  make check-path     - Verify PATH configuration"
 	@echo "  make uninstall      - Remove all installed files"
 	@echo "  make clean          - Remove temporary files"
@@ -151,6 +152,22 @@ ifeq ($(UNAME_S),Darwin)
 	@echo ""
 	@echo "To check status: launchctl list | grep ssh-tunnel-agent"
 	@echo "To view logs: tail -f /tmp/ssh-tunnel-agent/launchd-*.log"
+else
+	@echo "⚠ This target is only available on macOS"
+	@exit 1
+endif
+
+disable:
+ifeq ($(UNAME_S),Darwin)
+	@if [ ! -f "$(PLIST_TARGET)" ]; then \
+	    echo "⚠ Launch agent not installed. Nothing to disable."; \
+	    exit 1; \
+	fi
+	@echo "Disabling launch agent..."
+	@launchctl unload -w "$(PLIST_TARGET)"
+	@echo "✓ Launch agent disabled and will no longer start at login"
+	@echo ""
+	@echo "To re-enable: make enable"
 else
 	@echo "⚠ This target is only available on macOS"
 	@exit 1

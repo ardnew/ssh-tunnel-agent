@@ -9,13 +9,14 @@
 #   - "/etc/ssh-tunnel-agent/config"
 
 # SSH Connection Settings
-ssh_config[host]="proxyhost"
-ssh_config[port]="22"
-ssh_config[user]=${USER}
-ssh_config[term]="xterm-256color"
+ssh_host="proxyhost"
+ssh_port="22"
+ssh_user="${USER}"
+ssh_term="xterm-256color"
 
 # Tunnel Definitions
-# Format: [name]="type:spec type:spec ..."
+# Two parallel arrays: tunnel_names[i] corresponds to tunnel_specs[i]
+# Spec format: "type:spec type:spec ..."
 #
 # Tunnel Types:
 #   L:localport:remotehost:remoteport  - Local port forward
@@ -23,15 +24,17 @@ ssh_config[term]="xterm-256color"
 #   R:remoteport:localhost:localport   - Remote port forward
 #
 # Examples:
-#   [web]="L:8080:webserver:80"
-#   [proxy]="D:1080"
-#   [reverse]="R:9000:localhost:9000"
-#   [multi]="L:3000:srv1:3000 L:4000:srv2:4000"
+#   tunnel_names+=( "web" )
+#   tunnel_specs+=( "L:8080:webserver:80" )
+#
+#   tunnel_names+=( "multi" )
+#   tunnel_specs+=( "L:3000:srv1:3000 L:4000:srv2:4000" )
 
-tunnel_spec=(
-  [svn]="L:3690:remotehost:3690 L:3343:remotehost:3343"
-  [jira]="L:8081:remotehost:8081"
-  [socks]="D:65135"
+tunnel_names=(  "svn"   "jira"  "socks" )
+tunnel_specs=(
+  "L:3690:remotehost:3690 L:3343:remotehost:3343"
+  "L:8081:remotehost:8081"
+  "D:65135"
 )
 
 # Optional: Enable debug logging

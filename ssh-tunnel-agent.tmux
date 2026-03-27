@@ -28,23 +28,23 @@ declare -r _session_id=${_self_id//./-}
 declare -r _log_file="${XDG_STATE_HOME:-${HOME}/.local/state}/${_self_id}/tunnel.log"
 
 # Default SSH connection settings (can be overridden in config)
-declare -A ssh_config=(
-  [host]="proxyhost"
-  [port]="22"
-  [user]=${USER}
-  [term]=${TERM}
-)
+ssh_host="proxyhost"
+ssh_port="22"
+ssh_user="${USER}"
+ssh_term="${TERM}"
 
 # Tunnel definitions (can be overridden by config file)
-# Format: [name]="type:spec type:spec ..."
+# Two parallel arrays: tunnel_names[i] corresponds to tunnel_specs[i]
+# Spec format: "type:spec type:spec ..."
 # Types:
 #   L:localport:remotehost:remoteport  - Local port forward
 #   D:localport                        - Dynamic SOCKS proxy
 #   R:remoteport:localhost:localport   - Remote port forward
-declare -A tunnel_spec=(
-  [svn]="L:3690:remotehost:3690 L:3343:remotehost:3343"
-  [jira]="L:8081:remotehost:8081"
-  [socks]="D:65135"
+tunnel_names=(  "svn"   "jira"  "socks" )
+tunnel_specs=(
+  "L:3690:remotehost:3690 L:3343:remotehost:3343"
+  "L:8081:remotehost:8081"
+  "D:65135"
 )
 
 # ============================================================================
@@ -122,11 +122,10 @@ ensure_log_dir() {
 }
 
 # Parse tunnel specification into SSH arguments
-# Returns array of SSH arguments via nameref
+# Appends results to global _forward_args array
 parse_tunnel_spec() {
-  local -n result_array=$1
-  local spec="$2"
-  local tunnel_name="$3"
+  local spec="$1"
+  local tunnel_name="$2"
 
   local type="${spec%%:*}"
   local rest="${spec#*:}"
@@ -135,7 +134,7 @@ parse_tunnel_spec() {
     L)
       # L:localport:remotehost:remoteport
       if [[ "${rest}" =~ ^([0-9]+):([^:]+):([0-9]+)$ ]]; then
-        result_array+=("-L" "localhost:${BASH_REMATCH[1]}:${BASH_REMATCH[2]}:${BASH_REMATCH[3]}")
+        _forward_args+=("-L" "localhost:${BASH_REMATCH[1]}:${BASH_REMATCH[2]}:${BASH_REMATCH[3]}")
       else
         error "Invalid local forward specification for ${tunnel_name}: ${spec}"
         return 1
@@ -144,7 +143,7 @@ parse_tunnel_spec() {
     D)
       # D:localport
       if [[ "${rest}" =~ ^([0-9]+)$ ]]; then
-        result_array+=("-D" "${BASH_REMATCH[1]}")
+        _forward_args+=("-D" "${BASH_REMATCH[1]}")
       else
         error "Invalid dynamic forward specification for ${tunnel_name}: ${spec}"
         return 1
@@ -153,7 +152,7 @@ parse_tunnel_spec() {
     R)
       # R:remoteport:localhost:localport
       if [[ "${rest}" =~ ^([0-9]+):([^:]+):([0-9]+)$ ]]; then
-        result_array+=("-R" "${BASH_REMATCH[1]}:${BASH_REMATCH[2]}:${BASH_REMATCH[3]}")
+        _forward_args+=("-R" "${BASH_REMATCH[1]}:${BASH_REMATCH[2]}:${BASH_REMATCH[3]}")
       else
         error "Invalid remote forward specification for ${tunnel_name}: ${spec}"
         return 1
@@ -169,35 +168,34 @@ parse_tunnel_spec() {
 }
 
 # Build SSH command for a tunnel
+# Sets global _ssh_cmd array with the result
 build_ssh_command() {
-  local -n cmd_array=$1
-  local tunnel_name="$2"
-  local tunnel_specs="$3"
+  local tunnel_name="$1"
+  local tunnel_specs_str="$2"
 
-  local -a forward_args=()
+  _forward_args=()
 
   # Parse each tunnel specification
-  for spec in ${tunnel_specs}; do
-    parse_tunnel_spec forward_args "${spec}" "${tunnel_name}" || return 1
+  for spec in ${tunnel_specs_str}; do
+    parse_tunnel_spec "${spec}" "${tunnel_name}" || return 1
   done
 
-  if [[ ${#forward_args[@]} -eq 0 ]]; then
+  if [[ ${#_forward_args[@]} -eq 0 ]]; then
     error "No valid forwarding specifications for tunnel: ${tunnel_name}"
     return 1
   fi
 
-  # shellcheck disable=SC2034
-  cmd_array=(
+  _ssh_cmd=(
     "ssh"
     "-v" "-N" "-T"
-    "-p" "${ssh_config[port]}"
-    "-o" "SetEnv=TERM=${ssh_config[term]}"
+    "-p" "${ssh_port}"
+    "-o" "SetEnv=TERM=${ssh_term}"
     "-o" "SessionType=none"
     "-o" "ExitOnForwardFailure=yes"
     "-o" "ServerAliveInterval=60"
     "-o" "ServerAliveCountMax=3"
-    "${forward_args[@]}"
-    "${ssh_config[user]}@${ssh_config[host]}"
+    "${_forward_args[@]}"
+    "${ssh_user}@${ssh_host}"
   )
 
   return 0
@@ -216,9 +214,10 @@ show_status() {
   tmux list-panes -t "${_session_id}" -F "  #{pane_index}: #{pane_current_command} (#{pane_pid})" 2>/dev/null || true
   echo
   echo "Active port forwards:"
-  for tunnel in "${!tunnel_spec[@]}"; do
-    echo "  ${tunnel}:"
-    for spec in ${tunnel_spec[${tunnel}]}; do
+  local i
+  for i in "${!tunnel_names[@]}"; do
+    echo "  ${tunnel_names[i]}:"
+    for spec in ${tunnel_specs[i]}; do
       case "${spec%%:*}" in
         L) echo "    Local: ${spec#*:}" ;;
         D) echo "    SOCKS: ${spec#*:}" ;;
@@ -231,8 +230,9 @@ show_status() {
 # List configured tunnels
 list_tunnels() {
   echo "Configured tunnels:"
-  for tunnel in "${!tunnel_spec[@]}"; do
-    echo "  ${tunnel}: ${tunnel_spec[${tunnel}]}"
+  local i
+  for i in "${!tunnel_names[@]}"; do
+    echo "  ${tunnel_names[i]}: ${tunnel_specs[i]}"
   done
 }
 
@@ -266,21 +266,23 @@ start_tunnels() {
   local pane_count=0
 
   # Create a pane for each tunnel
-  for tunnel_name in "${!tunnel_spec[@]}"; do
-    local -a ssh_cmd=()
+  local i
+  for i in "${!tunnel_names[@]}"; do
+    local tunnel_name="${tunnel_names[i]}"
+    _ssh_cmd=()
 
-    if ! build_ssh_command ssh_cmd "${tunnel_name}" "${tunnel_spec[${tunnel_name}]}"; then
+    if ! build_ssh_command "${tunnel_name}" "${tunnel_specs[i]}"; then
       error "Skipping tunnel ${tunnel_name} due to configuration error"
       continue
     fi
 
     if [[ ${first_pane} -eq 1 ]]; then
       # First pane: create session
-      tmux_cmd+=("${ssh_cmd[@]}" ";")
+      tmux_cmd+=("${_ssh_cmd[@]}" ";")
       first_pane=0
     else
       # Subsequent panes: split window
-      tmux_cmd+=("split-window" "-c" "${HOME}" "${ssh_cmd[@]}" ";")
+      tmux_cmd+=("split-window" "-c" "${HOME}" "${_ssh_cmd[@]}" ";")
     fi
 
     # Use prefix-increment to prevent evaluating to error (0), which would exit
@@ -354,16 +356,17 @@ Configuration:
     - /usr/local/etc/${_self_id}/config
     - /etc/${_self_id}/config
 
-  Config file can override ssh_config and tunnel_spec arrays.
+  Config file can override ssh_* variables and tunnel_names/tunnel_specs arrays.
 
-  ssh_config keys:
-    host    - SSH proxy host (default: proxyhost)
-    port    - SSH port (default: 22)
-    user    - SSH user (default: current user)
-    term    - Terminal type (default: current TERM)
+  SSH variables:
+    ssh_host    - SSH proxy host (default: proxyhost)
+    ssh_port    - SSH port (default: 22)
+    ssh_user    - SSH user (default: current user)
+    ssh_term    - Terminal type (default: current TERM)
 
-  tunnel_spec format:
-    [name]="type:spec type:spec ..."
+  tunnel_names/tunnel_specs format (parallel arrays):
+    tunnel_names+=( "name" )
+    tunnel_specs+=( "type:spec type:spec ..." )
 
     Types:
       L:localport:remotehost:remoteport  - Local port forward
