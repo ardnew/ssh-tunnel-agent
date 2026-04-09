@@ -2,7 +2,7 @@
 
 > Maintains multiple SSH tunnels in a persistent tmux session
 
-A lightweight bash tool that manages SSH tunnels through tmux, with automatic reconnection and optional launchd integration for macOS.
+A lightweight bash tool that manages SSH tunnels through tmux, with automatic reconnection and optional daemon integration for macOS (launchd) and Linux (systemd).
 
 ## Features
 
@@ -11,6 +11,7 @@ A lightweight bash tool that manages SSH tunnels through tmux, with automatic re
 - **Automatic Recovery** - Reconnects on failure with configurable keep-alive
 - **tmux Integration** - Organized view of all tunnel connections
 - **macOS LaunchAgent** - Optional automatic startup and config file watching
+- **Linux systemd** - Optional user service with automatic startup and config file watching
 - **Simple Setup** - File-based configuration, easy install/uninstall via [`Makefile`](Makefile)
 
 ## Quickstart
@@ -25,7 +26,7 @@ make help
 
 ```bash
 make install
-make enable    # macOS only (launchd integration)
+make enable    # macOS (launchd) or Linux (systemd)
 ```
 
 ## Configuration
@@ -174,6 +175,25 @@ View logs:
 ```bash
 tail -f /tmp/ssh-tunnel-agent/launchd-*.log
 ```
+
+### Linux systemd
+
+```bash
+systemctl --user status ssh-tunnel-agent         # Check if running
+systemctl --user stop ssh-tunnel-agent            # Stop service
+systemctl --user start ssh-tunnel-agent           # Start service
+systemctl --user restart ssh-tunnel-agent         # Restart service
+```
+
+View logs:
+```bash
+journalctl --user -u ssh-tunnel-agent
+```
+
+The systemd integration installs three user units:
+- `ssh-tunnel-agent.service` — starts and stops the tmux tunnel session
+- `ssh-tunnel-agent-watcher.path` — watches the config file for changes
+- `ssh-tunnel-agent-watcher.service` — restarts the tunnel service when config changes
 
 ## Examples
 

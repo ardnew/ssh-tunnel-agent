@@ -1,0 +1,8 @@
+[Unit]
+Description=Watch SSH Tunnel Agent config for changes
+
+[Path]
+PathChanged=/usr/local/etc/ssh-tunnel-agent/config
+
+[Install]
+WantedBy=default.target

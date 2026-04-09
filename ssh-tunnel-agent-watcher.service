@@ -1,0 +1,6 @@
+[Unit]
+Description=Restart SSH Tunnel Agent on config change
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl --user restart ssh-tunnel-agent.service

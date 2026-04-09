@@ -1,6 +1,6 @@
 # Makefile for ssh-tunnel-agent
 
-# Installs configuration files and launch agent to appropriate system locations
+# Installs configuration files and daemon service to appropriate system locations
 
 SHELL := /bin/bash
 
@@ -10,7 +10,7 @@ UNAME_S := $(shell uname -s)
 # Installation directories
 HOME_DIR := $(HOME)
 XDG_CONFIG_HOME ?= $(HOME_DIR)/.config
-CONFIG_BASE := $(if $(XDG_CONFIG_HOME),$(XDG_CONFIG_HOME),$(HOME_DIR)/.local/etc)
+CONFIG_BASE := $(or $(XDG_CONFIG_HOME),$(HOME_DIR)/.local/etc)
 CONFIG_DIR := $(CONFIG_BASE)/ssh-tunnel-agent
 BIN_DIR := $(HOME_DIR)/.local/bin
 
@@ -18,40 +18,54 @@ BIN_DIR := $(HOME_DIR)/.local/bin
 CONFIG_TARGET := $(CONFIG_DIR)/config
 TMUX_TARGET := $(BIN_DIR)/ssh-tunnel-agent.tmux
 PLIST_TARGET := $(HOME_DIR)/Library/LaunchAgents/ssh-tunnel-agent.plist
+SYSTEMD_DIR := $(HOME_DIR)/.config/systemd/user
+SERVICE_TARGET := $(SYSTEMD_DIR)/ssh-tunnel-agent.service
+WATCHER_PATH_TARGET := $(SYSTEMD_DIR)/ssh-tunnel-agent-watcher.path
+WATCHER_SERVICE_TARGET := $(SYSTEMD_DIR)/ssh-tunnel-agent-watcher.service
 
 # Source files
 CONFIG_SRC := config
 TMUX_SRC := ssh-tunnel-agent.tmux
 PLIST_SRC := ssh-tunnel-agent.plist
+SERVICE_SRC := ssh-tunnel-agent.service
+WATCHER_PATH_SRC := ssh-tunnel-agent-watcher.path
+WATCHER_SERVICE_SRC := ssh-tunnel-agent-watcher.service
 
-.PHONY: all install install-config install-tmux install-plist check-path enable disable clean uninstall help
+.PHONY: all install install-config install-tmux install-daemon install-plist install-systemd check-path enable disable clean uninstall help show-paths
 
 all: install
 
 help:
 	@echo "ssh-tunnel-agent installation targets:"
 	@echo ""
-	@echo "  make install        - Install all files (default)"
-	@echo "  make install-config - Install config file only"
-	@echo "  make install-tmux   - Install tmux script only"
-	@echo "  make install-plist  - Install launchd plist only (macOS)"
-	@echo "  make enable         - Enable LaunchAgent via launchctl (macOS)"
-	@echo "  make disable        - Disable LaunchAgent via launchctl (macOS)"
-	@echo "  make check-path     - Verify PATH configuration"
-	@echo "  make uninstall      - Remove all installed files"
-	@echo "  make clean          - Remove temporary files"
+	@echo "  make install         - Install all files (default)"
+	@echo "  make install-config  - Install config file only"
+	@echo "  make install-tmux    - Install tmux script only"
+ifeq ($(UNAME_S),Darwin)
+	@echo "  make install-plist   - Install launchd plist (macOS)"
+else ifeq ($(UNAME_S),Linux)
+	@echo "  make install-systemd - Install systemd user service (Linux)"
+endif
+	@echo "  make enable          - Enable daemon for automatic startup"
+	@echo "  make disable         - Disable daemon automatic startup"
+	@echo "  make check-path      - Verify PATH configuration"
+	@echo "  make uninstall       - Remove all installed files"
+	@echo "  make clean           - Remove temporary files"
 	@echo ""
 
-install: install-config install-tmux install-plist check-path
+install: install-config install-tmux install-daemon check-path
 	@echo ""
 	@echo "✓ Installation complete!"
 	@echo ""
 	@echo "Next steps:"
 	@echo "  1. Edit $(CONFIG_TARGET) to configure your tunnels"
-	@echo "  2. macOS (one-time):"
-	@echo "       Load the LaunchAgent: make enable"
-	@echo "     Other OS (as-needed):"
-	@echo "       Create the tunnel(s): ssh-tunnel-agent.tmux start"
+ifeq ($(UNAME_S),Darwin)
+	@echo "  2. Enable the LaunchAgent: make enable"
+else ifeq ($(UNAME_S),Linux)
+	@echo "  2. Enable the systemd service: make enable"
+else
+	@echo "  2. Start the tunnels manually: ssh-tunnel-agent.tmux start"
+endif
 	@echo "  3. Check status: ssh-tunnel-agent.tmux status"
 	@echo ""
 
@@ -61,8 +75,23 @@ install-config: $(CONFIG_TARGET)
 install-tmux: $(TMUX_TARGET)
 	@echo "✓ Tmux script installed to: $(TMUX_TARGET)"
 
+# OS-specific daemon installation
+ifeq ($(UNAME_S),Darwin)
+install-daemon: install-plist
+else ifeq ($(UNAME_S),Linux)
+install-daemon: install-systemd
+else
+install-daemon:
+	@echo "⚠ WARNING: Daemon installation skipped (unsupported OS: $(UNAME_S))"
+	@echo "  For automatic startup, consider using your init system's user service manager,"
+	@echo "  or start tunnels manually with: ssh-tunnel-agent.tmux start"
+endif
+
 install-plist: $(PLIST_TARGET)
 	@echo "✓ Launch agent installed to: $(PLIST_TARGET)"
+
+install-systemd: $(SERVICE_TARGET) $(WATCHER_PATH_TARGET) $(WATCHER_SERVICE_TARGET)
+	@echo "✓ Systemd user service installed to: $(SYSTEMD_DIR)"
 
 $(CONFIG_TARGET): $(CONFIG_SRC)
 	@echo "Installing config file..."
@@ -75,7 +104,6 @@ $(TMUX_TARGET): $(TMUX_SRC)
 	@install -m 755 "$(TMUX_SRC)" "$(TMUX_TARGET)"
 
 $(PLIST_TARGET): $(PLIST_SRC) $(TMUX_TARGET)
-ifeq ($(UNAME_S),Darwin)
 	@echo "Installing launch agent (macOS)..."
 	@mkdir -p "$(HOME_DIR)/Library/LaunchAgents"
 	@# Create modified plist with correct paths
@@ -90,14 +118,26 @@ ifeq ($(UNAME_S),Darwin)
 	fi
 	@mv "$(PLIST_TARGET).tmp" "$(PLIST_TARGET)"
 	@chmod 644 "$(PLIST_TARGET)"
-else
-	@echo "⚠ WARNING: Launch agent installation skipped (not macOS)"
-	@echo "  The plist file is only supported on macOS systems."
-	@echo "  For automatic startup on other systems, consider using:"
-	@echo "    - systemd user services (Linux)"
-	@echo "    - cron @reboot entries"
-	@echo "    - your init system's user service manager"
-endif
+
+$(SERVICE_TARGET): $(SERVICE_SRC) $(TMUX_TARGET)
+	@echo "Installing systemd user service..."
+	@mkdir -p "$(SYSTEMD_DIR)"
+	@sed -e 's|ExecStart=.*|ExecStart=$(TMUX_TARGET) start|' \
+	     -e 's|ExecStop=.*|ExecStop=$(TMUX_TARGET) stop|' \
+	     -e 's|Environment=PATH=.*|Environment=PATH=$(BIN_DIR):/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin|' \
+	     "$(SERVICE_SRC)" > "$(SERVICE_TARGET)"
+	@chmod 644 "$(SERVICE_TARGET)"
+
+$(WATCHER_PATH_TARGET): $(WATCHER_PATH_SRC) $(CONFIG_TARGET)
+	@echo "Installing systemd config watcher..."
+	@mkdir -p "$(SYSTEMD_DIR)"
+	@sed -e 's|PathChanged=.*|PathChanged=$(CONFIG_TARGET)|' \
+	     "$(WATCHER_PATH_SRC)" > "$(WATCHER_PATH_TARGET)"
+	@chmod 644 "$(WATCHER_PATH_TARGET)"
+
+$(WATCHER_SERVICE_TARGET): $(WATCHER_SERVICE_SRC)
+	@mkdir -p "$(SYSTEMD_DIR)"
+	@install -m 644 "$(WATCHER_SERVICE_SRC)" "$(WATCHER_SERVICE_TARGET)"
 
 check-path:
 	@echo "Checking PATH configuration..."
@@ -152,8 +192,21 @@ ifeq ($(UNAME_S),Darwin)
 	@echo ""
 	@echo "To check status: launchctl list | grep ssh-tunnel-agent"
 	@echo "To view logs: tail -f /tmp/ssh-tunnel-agent/launchd-*.log"
+else ifeq ($(UNAME_S),Linux)
+	@if [ ! -f "$(SERVICE_TARGET)" ]; then \
+	    echo "⚠ Systemd service not installed. Run 'make install' first."; \
+	    exit 1; \
+	fi
+	@echo "Enabling systemd user service..."
+	@systemctl --user daemon-reload
+	@systemctl --user enable --now ssh-tunnel-agent.service
+	@systemctl --user enable --now ssh-tunnel-agent-watcher.path
+	@echo "✓ Systemd service enabled and will start automatically at login"
+	@echo ""
+	@echo "To check status: systemctl --user status ssh-tunnel-agent"
+	@echo "To view logs: journalctl --user -u ssh-tunnel-agent"
 else
-	@echo "⚠ This target is only available on macOS"
+	@echo "⚠ Automatic startup is not supported on this OS"
 	@exit 1
 endif
 
@@ -168,8 +221,19 @@ ifeq ($(UNAME_S),Darwin)
 	@echo "✓ Launch agent disabled and will no longer start at login"
 	@echo ""
 	@echo "To re-enable: make enable"
+else ifeq ($(UNAME_S),Linux)
+	@if [ ! -f "$(SERVICE_TARGET)" ]; then \
+	    echo "⚠ Systemd service not installed. Nothing to disable."; \
+	    exit 1; \
+	fi
+	@echo "Disabling systemd user service..."
+	@systemctl --user disable --now ssh-tunnel-agent-watcher.path
+	@systemctl --user disable --now ssh-tunnel-agent.service
+	@echo "✓ Systemd service disabled and will no longer start at login"
+	@echo ""
+	@echo "To re-enable: make enable"
 else
-	@echo "⚠ This target is only available on macOS"
+	@echo "⚠ Automatic startup is not supported on this OS"
 	@exit 1
 endif
 
@@ -180,6 +244,14 @@ ifeq ($(UNAME_S),Darwin)
 	    launchctl unload "$(PLIST_TARGET)" 2>/dev/null || true; \
 	    rm -f "$(PLIST_TARGET)"; \
 	    echo "✓ Removed launch agent"; \
+	fi
+else ifeq ($(UNAME_S),Linux)
+	@if [ -f "$(SERVICE_TARGET)" ]; then \
+	    systemctl --user disable --now ssh-tunnel-agent-watcher.path 2>/dev/null || true; \
+	    systemctl --user disable --now ssh-tunnel-agent.service 2>/dev/null || true; \
+	    rm -f "$(SERVICE_TARGET)" "$(WATCHER_PATH_TARGET)" "$(WATCHER_SERVICE_TARGET)"; \
+	    systemctl --user daemon-reload; \
+	    echo "✓ Removed systemd service"; \
 	fi
 endif
 	@rm -f "$(TMUX_TARGET)"
@@ -201,7 +273,6 @@ clean:
 	@rm -f "$(PLIST_TARGET).tmp" "$(PLIST_TARGET).tmp2"
 	@echo "✓ Cleaned temporary files"
 
-.PHONY: show-paths
 show-paths:
 	@echo "Environment:"
 	@echo "  OS:               $(UNAME_S)"
@@ -210,4 +281,9 @@ show-paths:
 	@echo "Installation paths:"
 	@echo "  config:           $(CONFIG_TARGET)"
 	@echo "  tmux script:      $(TMUX_TARGET)"
+ifeq ($(UNAME_S),Darwin)
 	@echo "  LaunchAgent:      $(PLIST_TARGET)"
+else ifeq ($(UNAME_S),Linux)
+	@echo "  systemd service:  $(SERVICE_TARGET)"
+	@echo "  config watcher:   $(WATCHER_PATH_TARGET)"
+endif

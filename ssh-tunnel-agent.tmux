@@ -24,7 +24,7 @@ declare -ar _config_path=(
 # Session name for tmux
 declare -r _session_id=${_self_id//./-}
 
-# Log file for debugging (used by launchd)
+# Log file for debugging (used by launchd/systemd)
 declare -r _log_file="${XDG_STATE_HOME:-${HOME}/.local/state}/${_self_id}/tunnel.log"
 
 # Default SSH connection settings (can be overridden in config)
