@@ -30,12 +30,17 @@ ssh_term="xterm-256color"
 #   tunnel_names+=( "multi" )
 #   tunnel_specs+=( "L:3000:srv1:3000 L:4000:srv2:4000" )
 
-tunnel_names=(  "svn"   "jira"  "socks" )
-tunnel_specs=(
-  "L:3690:remotehost:3690 L:3343:remotehost:3343"
-  "L:8081:remotehost:8081"
-  "D:65135"
-)
+declare -a tunnel_names
+declare -a tunnel_specs
+
+tunnel_names+=( "svn" )
+tunnel_specs+=( "L:3690:remotehost:3690 L:3343:remotehost:3343" )
+
+tunnel_names+=( "jira" )
+tunnel_specs+=( "L:8081:remotehost:8081" )
+
+tunnel_names+=( "socks" )
+tunnel_specs+=( "D:65135" )
 
 # Optional: Enable debug logging
 # DEBUG=1
