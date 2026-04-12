@@ -18,6 +18,7 @@ declare -ar _config_path=(
   "${XDG_CONFIG_HOME:-${HOME}/.config}/${_self_id}/config"
   "${HOME}/.local/etc/${_self_id}/config"
   "/usr/local/etc/${_self_id}/config"
+  "/usr/etc/${_self_id}/config"
   "/etc/${_self_id}/config"
 )
 
@@ -26,26 +27,6 @@ declare -r _session_id=${_self_id//./-}
 
 # Log file for debugging (used by launchd/systemd)
 declare -r _log_file="${XDG_STATE_HOME:-${HOME}/.local/state}/${_self_id}/tunnel.log"
-
-# Default SSH connection settings (can be overridden in config)
-ssh_host="proxyhost"
-ssh_port="22"
-ssh_user="${USER}"
-ssh_term="${TERM}"
-
-# Tunnel definitions (can be overridden by config file)
-# Two parallel arrays: tunnel_names[i] corresponds to tunnel_specs[i]
-# Spec format: "type:spec type:spec ..."
-# Types:
-#   L:localport:remotehost:remoteport  - Local port forward
-#   D:localport                        - Dynamic SOCKS proxy
-#   R:remoteport:localhost:localport   - Remote port forward
-tunnel_names=(  "svn"   "jira"  "socks" )
-tunnel_specs=(
-  "L:3690:remotehost:3690 L:3343:remotehost:3343"
-  "L:8081:remotehost:8081"
-  "D:65135"
-)
 
 # ============================================================================
 # Functions
@@ -76,7 +57,7 @@ die() {
   exit 1
 }
 
-# Load configuration from file if it exists
+# Load configuration from file (required)
 load_config() {
   local config_file=""
 
@@ -87,12 +68,25 @@ load_config() {
     fi
   done
 
-  if [[ -n "${config_file}" ]]; then
-    info "Loading configuration from ${config_file}"
-    # shellcheck source=/dev/null
-    source "${config_file}"
-  else
-    debug "No configuration file found, using defaults"
+  if [[ -z "${config_file}" ]]; then
+    die "No configuration file found. Searched:" \
+        "${_config_path[*]}"
+  fi
+
+  info "Loading configuration from ${config_file}"
+  # shellcheck source=/dev/null
+  source "${config_file}"
+
+  # Validate required settings
+  local missing=()
+  [[ -z "${ssh_host:-}" ]] && missing+=("ssh_host")
+  [[ -z "${ssh_port:-}" ]] && missing+=("ssh_port")
+  [[ -z "${ssh_user:-}" ]] && missing+=("ssh_user")
+  [[ -z "${ssh_term:-}" ]] && missing+=("ssh_term")
+
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    die "Missing required config settings: ${missing[*]}" \
+        "(in ${config_file})"
   fi
 }
 
@@ -292,7 +286,8 @@ start_tunnels() {
   done
 
   if [[ ${pane_count} -eq 0 ]]; then
-    die "No valid tunnels configured"
+    info "No tunnels configured; waiting for config file update"
+    return 0
   fi
 
   # Apply even-vertical layout for equal height horizontal panes
@@ -354,15 +349,14 @@ Configuration:
     - ${XDG_CONFIG_HOME:-~/.config}/${_self_id}/config
     - ~/.local/etc/${_self_id}/config
     - /usr/local/etc/${_self_id}/config
+    - /usr/etc/${_self_id}/config
     - /etc/${_self_id}/config
 
-  Config file can override ssh_* variables and tunnel_names/tunnel_specs arrays.
-
-  SSH variables:
-    ssh_host    - SSH proxy host (default: proxyhost)
-    ssh_port    - SSH port (default: 22)
-    ssh_user    - SSH user (default: current user)
-    ssh_term    - Terminal type (default: current TERM)
+  Config file must define the following SSH variables:
+    ssh_host    - SSH proxy host
+    ssh_port    - SSH port
+    ssh_user    - SSH user
+    ssh_term    - Terminal type
 
   tunnel_names/tunnel_specs format (parallel arrays):
     tunnel_names+=( "name" )

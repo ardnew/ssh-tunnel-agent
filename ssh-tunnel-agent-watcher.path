@@ -5,6 +5,7 @@ Description=Watch SSH Tunnel Agent config for changes
 PathChanged=%h/.config/ssh-tunnel-agent/config
 PathChanged=%h/.local/etc/ssh-tunnel-agent/config
 PathChanged=/usr/local/etc/ssh-tunnel-agent/config
+PathChanged=/usr/etc/ssh-tunnel-agent/config
 PathChanged=/etc/ssh-tunnel-agent/config
 
 [Install]

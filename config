@@ -6,6 +6,7 @@
 #   - "${XDG_CONFIG_HOME:-${HOME}/.config}/ssh-tunnel-agent/config"
 #   - "${HOME}/.local/etc/ssh-tunnel-agent/config"
 #   - "/usr/local/etc/ssh-tunnel-agent/config"
+#   - "/usr/etc/ssh-tunnel-agent/config"
 #   - "/etc/ssh-tunnel-agent/config"
 
 # SSH Connection Settings

@@ -49,6 +49,7 @@
     <string>~/.config/ssh-tunnel-agent/config</string>
     <string>~/.local/etc/ssh-tunnel-agent/config</string>
     <string>/usr/local/etc/ssh-tunnel-agent/config</string>
+    <string>/usr/etc/ssh-tunnel-agent/config</string>
     <string>/etc/ssh-tunnel-agent/config</string>
   </array>
 
