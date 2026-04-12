@@ -122,18 +122,17 @@ $(PLIST_TARGET): $(PLIST_SRC) $(TMUX_TARGET)
 $(SERVICE_TARGET): $(SERVICE_SRC) $(TMUX_TARGET)
 	@echo "Installing systemd user service..."
 	@mkdir -p "$(SYSTEMD_DIR)"
-	@sed -e 's|ExecStart=.*|ExecStart=$(TMUX_TARGET) start|' \
-	     -e 's|ExecStop=.*|ExecStop=$(TMUX_TARGET) stop|' \
-	     -e 's|Environment=PATH=.*|Environment=PATH=$(BIN_DIR):/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin|' \
-	     "$(SERVICE_SRC)" > "$(SERVICE_TARGET)"
+	@cp "$(SERVICE_SRC)" "$(SERVICE_TARGET)"
+	@# Ensure BIN_DIR is in the service PATH so ssh-tunnel-agent.tmux is found
+	@if ! grep -q '^Environment=PATH=' "$(SERVICE_TARGET)"; then \
+	    sed -i '/^\[Service\]/a Environment=PATH=$(BIN_DIR):/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin' "$(SERVICE_TARGET)"; \
+	fi
 	@chmod 644 "$(SERVICE_TARGET)"
 
 $(WATCHER_PATH_TARGET): $(WATCHER_PATH_SRC) $(CONFIG_TARGET)
 	@echo "Installing systemd config watcher..."
 	@mkdir -p "$(SYSTEMD_DIR)"
-	@sed -e 's|PathChanged=.*|PathChanged=$(CONFIG_TARGET)|' \
-	     "$(WATCHER_PATH_SRC)" > "$(WATCHER_PATH_TARGET)"
-	@chmod 644 "$(WATCHER_PATH_TARGET)"
+	@install -m 644 "$(WATCHER_PATH_SRC)" "$(WATCHER_PATH_TARGET)"
 
 $(WATCHER_SERVICE_TARGET): $(WATCHER_SERVICE_SRC)
 	@mkdir -p "$(SYSTEMD_DIR)"

@@ -4,9 +4,8 @@ Description=SSH Tunnel Agent - Maintains SSH tunnels in a tmux session
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/usr/local/bin/ssh-tunnel-agent.tmux start
-ExecStop=/usr/local/bin/ssh-tunnel-agent.tmux stop
-Environment=PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+ExecStart=ssh-tunnel-agent.tmux start
+ExecStop=ssh-tunnel-agent.tmux stop
 
 [Install]
 WantedBy=default.target
