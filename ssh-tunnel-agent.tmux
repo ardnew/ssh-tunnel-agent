@@ -179,7 +179,7 @@ build_ssh_command() {
     return 1
   fi
 
-  _ssh_cmd=(
+  local -a ssh_argv=(
     "ssh"
     "-v" "-N" "-T"
     "-p" "${ssh_port}"
@@ -190,6 +190,52 @@ build_ssh_command() {
     "-o" "ServerAliveCountMax=3"
     "${_forward_args[@]}"
     "${ssh_user}@${ssh_host}"
+  )
+
+  # Wrap ssh in a bash runner that records startup, the "ready" moment (when
+  # all forwards are bound and ssh enters its interactive session), and any
+  # non-zero exit. This makes tunnel health visible in the shared log file
+  # even when running detached.
+  # Args to the runner: <tunnel-name> <log-file> <ssh...>
+  local runner='
+    name=$1; log=$2; shift 2
+    ts() { date +"%Y-%m-%d %H:%M:%S"; }
+    errfile=$(mktemp -t ssh-tunnel-agent.XXXXXX) || errfile=/tmp/ssh-tunnel-agent.$$.err
+    trap "rm -f \"$errfile\"" EXIT
+    printf "[%s] [INFO] tunnel %s: starting ssh\n" "$(ts)" "$name" >> "$log"
+    # Stream ssh stderr: keep it visible in the pane, save to errfile for
+    # later inclusion in the error report, and watch for the readiness marker.
+    "$@" 2> >(
+      ready=0
+      while IFS= read -r line; do
+        printf "%s\n" "$line" >&2
+        printf "%s\n" "$line" >> "$errfile"
+        if [[ $ready -eq 0 && $line == *"Entering interactive session."* ]]; then
+          ready=1
+          printf "[%s] [INFO] tunnel %s: ready\n" "$(ts)" "$name" >> "$log"
+        fi
+      done
+    )
+    rc=$?
+    if [[ $rc -ne 0 ]]; then
+      {
+        printf "[%s] [ERROR] tunnel %s: ssh exited with code %d\n" "$(ts)" "$name" "$rc"
+        printf "[%s] [ERROR] tunnel %s: last lines of ssh stderr:\n" "$(ts)" "$name"
+        tail -n 20 "$errfile" | sed "s/^/    /"
+      } >> "$log"
+      # keep the pane alive briefly so an attached user can read the error
+      printf "\n>>> tunnel %s failed (exit %d); see %s <<<\n" "$name" "$rc" "$log" >&2
+      sleep 10
+    else
+      printf "[%s] [INFO] tunnel %s: ssh exited cleanly\n" "$(ts)" "$name" >> "$log"
+    fi
+    exit "$rc"
+  '
+
+  _ssh_cmd=(
+    "bash" "-c" "${runner}" "ssh-tunnel-runner"
+    "${tunnel_name}" "${_log_file}"
+    "${ssh_argv[@]}"
   )
 
   return 0
@@ -230,6 +276,91 @@ list_tunnels() {
   done
 }
 
+# Wait for each started tunnel to become ready or fail, with timeout.
+# Reads the shared log file, scanning only lines appended since this session
+# started, and prints a status summary plus any error details.
+# Args: list of tunnel names that were launched
+# Respects TUNNEL_READY_TIMEOUT (seconds, default 15).
+wait_for_tunnels() {
+  local -a names=("$@")
+  local timeout="${TUNNEL_READY_TIMEOUT:-15}"
+  local start_epoch
+  start_epoch=$(date +%s)
+
+  local log_start_line=0
+  if [[ -f "${_log_file}" ]]; then
+    log_start_line=$(wc -l < "${_log_file}" | tr -d '[:space:]')
+    log_start_line=${log_start_line:-0}
+  fi
+
+  info "Waiting up to ${timeout}s for ${#names[@]} tunnel(s) to stabilize..."
+
+  # Parallel arrays: statuses[i] is the state of names[i].
+  # Values: "pending", "ready", "failed".
+  local -a statuses=()
+  local n
+  for n in "${names[@]}"; do statuses+=("pending"); done
+
+  local all_done=0
+  while [[ ${all_done} -eq 0 ]]; do
+    # Scan all new log lines and update status.
+    local line
+    while IFS= read -r line; do
+      local j
+      for j in "${!names[@]}"; do
+        [[ "${statuses[j]}" != "pending" ]] && continue
+        if [[ "${line}" == *"tunnel ${names[j]}: ready"* ]]; then
+          statuses[j]="ready"
+        elif [[ "${line}" == *"tunnel ${names[j]}: ssh exited with code"* ]]; then
+          statuses[j]="failed"
+        fi
+      done
+    done < <(tail -n "+$((log_start_line + 1))" "${_log_file}" 2>/dev/null)
+
+    all_done=1
+    local s
+    for s in "${statuses[@]}"; do
+      if [[ "${s}" == "pending" ]]; then all_done=0; break; fi
+    done
+
+    if [[ ${all_done} -eq 1 ]]; then break; fi
+
+    local now elapsed
+    now=$(date +%s)
+    elapsed=$((now - start_epoch))
+    if (( elapsed >= timeout )); then break; fi
+
+    sleep 1
+  done
+
+  # Summary
+  echo
+  echo "Tunnel status:"
+  local any_failed=0
+  local any_pending=0
+  local j
+  for j in "${!names[@]}"; do
+    case "${statuses[j]}" in
+      ready)   echo "  [OK]   ${names[j]}: ready" ;;
+      failed)  echo "  [FAIL] ${names[j]}: failed to start"; any_failed=1 ;;
+      *)       echo "  [??]   ${names[j]}: did not stabilize within ${timeout}s"; any_pending=1 ;;
+    esac
+  done
+
+  # If anything went wrong, dump the ERROR lines from this start cycle.
+  if [[ ${any_failed} -eq 1 || ${any_pending} -eq 1 ]]; then
+    echo
+    echo "Errors since start (${_log_file}):"
+    tail -n "+$((log_start_line + 1))" "${_log_file}" 2>/dev/null \
+      | grep -E '\[(ERROR|WARN)\]' \
+      | sed 's/^/  /' \
+      || echo "  (no error lines captured; check the log for ssh debug output)"
+    return 1
+  fi
+
+  return 0
+}
+
 # Start tunnel session
 start_tunnels() {
   local attach_mode="${1:-}"
@@ -258,6 +389,7 @@ start_tunnels() {
 
   local first_pane=1
   local pane_count=0
+  local -a added_names=()
 
   # Create a pane for each tunnel
   local i
@@ -282,6 +414,7 @@ start_tunnels() {
     # Use prefix-increment to prevent evaluating to error (0), which would exit
     # the script due to shopt errexit (-e).
     ((++pane_count))
+    added_names+=("${tunnel_name}")
     info "Added tunnel: ${tunnel_name}"
   done
 
@@ -297,12 +430,21 @@ start_tunnels() {
 
   debug "Executing: tmux ${tmux_cmd[*]}"
 
-  if tmux "${tmux_cmd[@]}"; then
-    info "Tunnel session started successfully with ${pane_count} tunnel(s)"
-    return 0
-  else
+  if ! tmux "${tmux_cmd[@]}"; then
     die "Failed to start tunnel session"
   fi
+
+  info "Tunnel session started with ${pane_count} pane(s); monitoring readiness..."
+
+  # When attaching, tmux takes over the terminal and we can't monitor.
+  if [[ "${attach_mode}" == "attach" ]]; then
+    return 0
+  fi
+
+  # Block until each tunnel is ready or has failed (or timeout).
+  local rc=0
+  wait_for_tunnels "${added_names[@]}" || rc=$?
+  return ${rc}
 }
 
 # Stop tunnel session
@@ -342,7 +484,8 @@ Options:
   -h, --help      Show this help message
 
 Environment Variables:
-  DEBUG=1         Enable debug logging
+  DEBUG=1                 Enable debug logging
+  TUNNEL_READY_TIMEOUT=N  Seconds to wait for tunnels to stabilize (default 15)
 
 Configuration:
   Config files are loaded from (first found):
